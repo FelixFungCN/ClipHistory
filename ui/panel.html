@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="./vendor/arco.css">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+    color: var(--color-text-1);
+    color-scheme: light;
+    -webkit-font-smoothing: antialiased;
+  }
+  [v-cloak] { display: none; }
+  #app { height: 100%; }
+
+  .clip-panel {
+    width: 100%; height: 100%;
+    display: flex; flex-direction: column;
+    background: var(--color-bg-2);
+    border: 1px solid var(--color-border-2);
+    border-radius: 12px;
+    overflow: hidden;
+    user-select: none;
+  }
+  .clip-panel *, .clip-panel *::before, .clip-panel *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+
+  .panel-head { flex: none; padding: 12px; border-bottom: 1px solid var(--color-border-1); }
+  .panel-head .arco-input-wrapper { border-radius: 8px; }
+  .panel-head input { user-select: text; }
+
+  .panel-body {
+    flex: 1; min-height: 0; padding: 6px 8px;
+    overflow-y: auto; overscroll-behavior: contain;
+    scrollbar-width: thin;
+  }
+  .panel-body::-webkit-scrollbar { width: 8px; }
+  .panel-body::-webkit-scrollbar-track { background: transparent; }
+  .panel-body::-webkit-scrollbar-thumb { background: var(--color-fill-3); border-radius: 4px; }
+
+  .clip-list { margin: 0; padding: 0; list-style: none; }
+  .clip-row {
+    padding: 8px 12px;
+    border-radius: 8px;
+    contain: content;
+    cursor: default;
+  }
+  .clip-row:hover { background: var(--color-fill-2); }
+  .clip-row.selected { background: rgb(var(--primary-1)); }
+  .clip-row.selected:hover { background: rgb(var(--primary-1)); }
+
+  .row-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .row-src {
+    font-size: 11px; line-height: 16px; letter-spacing: .02em;
+    color: var(--color-text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .row-time {
+    font-size: 11px; line-height: 16px; color: var(--color-text-3);
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .row-body {
+    margin-top: 2px; font-size: 13px; line-height: 20px; color: var(--color-text-1);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .clip-row.selected .row-body {
+    white-space: pre-wrap; overflow-wrap: anywhere;
+    overflow: visible; text-overflow: clip;
+  }
+  .row-more { margin-top: 4px; font-size: 11px; line-height: 16px; color: var(--color-text-3); }
+  mark {
+    padding: 0 1px; border-radius: 2px; color: inherit;
+    background: color-mix(in srgb, rgb(var(--primary-6)) 22%, transparent);
+  }
+
+  .empty-wrap { height: 100%; display: flex; align-items: center; justify-content: center; }
+
+  .panel-foot {
+    flex: none; height: 32px; padding: 0 12px;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    border-top: 1px solid var(--color-border-1);
+    font-size: 12px; color: var(--color-text-3);
+  }
+  .hints { display: flex; align-items: center; gap: 6px; }
+  kbd {
+    flex: none;
+    min-width: 24px;
+    padding: 0 5px; border-radius: 4px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+    font-weight: 500;
+    font-size: 11px; line-height: 16px;
+    background: var(--color-fill-2); color: var(--color-text-2);
+  }
+  .hints .sep { color: var(--color-text-4); }
+</style>
+</head>
+<body>
+<div id="app" v-cloak>
+  <section class="clip-panel" aria-label="剪贴板历史" @keydown="onKeydown" @click="focusSearch" @mousedown="onMouseDown">
+    <div class="panel-head">
+      <a-input
+        ref="searchEl"
+        v-model="keyword"
+        size="large"
+        allow-clear
+        placeholder="搜索剪贴板历史"
+      >
+        <template #prefix>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <circle cx="7" cy="7" r="4.6" stroke="currentColor" stroke-width="1.4"></circle>
+            <path d="M10.4 10.4 14 14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"></path>
+          </svg>
+        </template>
+      </a-input>
+    </div>
+
+    <div class="panel-body">
+      <ul v-if="items.length" class="clip-list" role="listbox" aria-label="剪贴板记录">
+        <li
+          v-for="item in items"
+          :key="item.id"
+          class="clip-row"
+          :class="{ selected: item.id === selectedId }"
+          role="option"
+          :aria-selected="item.id === selectedId"
+          @mousedown.prevent
+          @click="select(item)"
+          @dblclick="paste(item)"
+        >
+          <div class="row-meta">
+            <span class="row-src">{{ item.src }}</span>
+            <span class="row-time">{{ relTime(item.ts) }}</span>
+          </div>
+          <div class="row-body">
+            <template v-for="(seg, i) in highlight(item.body)" :key="i">
+              <mark v-if="seg.hit">{{ seg.t }}</mark>
+              <template v-else>{{ seg.t }}</template>
+            </template>
+          </div>
+          <div v-if="item.id === selectedId && item.truncated" class="row-more">内容过长，仅显示前 2 万字</div>
+        </li>
+      </ul>
+      <div v-else class="empty-wrap">
+        <a-empty :description="emptyText"></a-empty>
+      </div>
+    </div>
+
+    <div class="panel-foot">
+      <span v-if="total > 200">已显示前 200 / {{ total }} 条</span>
+      <span v-else-if="items.length !== total">{{ items.length }} / {{ total }} 条</span>
+      <span v-else>{{ total }} 条</span>
+      <span class="hints">
+        <kbd>↑↓</kbd>选择<span class="sep">·</span>
+        <kbd>Enter/双击</kbd>粘贴<span class="sep">·</span>
+        <kbd>⌘C</kbd>复制<span class="sep">·</span>
+        <kbd>⌘⌫</kbd>删除<span class="sep">·</span>
+        <kbd>Esc</kbd>关闭
+      </span>
+    </div>
+  </section>
+</div>
+
+<script src="./vendor/vue.global.prod.js"></script>
+<script src="./vendor/arco-vue.min.js"></script>
+<script>
+  const { createApp, ref, computed, watch, nextTick, onMounted, onBeforeUnmount } = Vue;
+
+  function post(type, data) {
+    try {
+      window.webkit.messageHandlers.cliphistory.postMessage(Object.assign({ type }, data || {}));
+    } catch (e) {}
+  }
+
+  createApp({
+    setup() {
+      const items = ref([]);
+      const total = ref(0);
+      const keyword = ref('');
+      const query = ref('');
+      const selectedId = ref(null);
+      const searchEl = ref(null);
+
+      let debounceTimer = null;
+      let pendingIndex = -1;
+
+      watch(keyword, val => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          const q = val.trim();
+          query.value = q.toLowerCase();
+          post('search', { q });
+        }, 100);
+      });
+
+      const kws = computed(() => query.value ? query.value.split(/\s+/).filter(Boolean) : []);
+      const hlRe = computed(() => {
+        if (!kws.value.length) return null;
+        const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return new RegExp('(' + kws.value.map(esc).join('|') + ')', 'gi');
+      });
+
+      const selectedItem = computed(() => items.value.find(it => it.id === selectedId.value) || null);
+      const emptyText = computed(() => total.value ? '没有匹配的记录' : '还没有剪贴板记录');
+
+      function relTime(ts) {
+        const d = Date.now() - ts * 1000;
+        if (d < 60000) return '刚刚';
+        if (d < 3600000) return Math.floor(d / 60000) + ' 分钟前';
+        if (d < 86400000) return Math.floor(d / 3600000) + ' 小时前';
+        return Math.floor(d / 86400000) + ' 天前';
+      }
+
+      function highlight(text) {
+        const re = hlRe.value;
+        if (!re) return [{ t: text, hit: false }];
+        return text.split(re).filter(Boolean).map(p => ({ t: p, hit: kws.value.includes(p.toLowerCase()) }));
+      }
+
+      function requestExpand(item) {
+        if (!item || item.expanded || item.expanding) return;
+        item.expanding = true;
+        post('expand', { id: item.id });
+      }
+
+      function select(item) {
+        selectedId.value = item.id;
+        requestExpand(item);
+      }
+
+      function scrollSelectedIntoView() {
+        const body = document.querySelector('.panel-body');
+        const el = document.querySelector('.clip-row.selected');
+        if (!body || !el) return;
+        const top = el.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop;
+        const bottom = top + el.offsetHeight;
+        if (bottom > body.scrollTop + body.clientHeight) body.scrollTop = bottom - body.clientHeight;
+        else if (top < body.scrollTop) body.scrollTop = top;
+      }
+
+      function move(step) {
+        if (!items.value.length) return;
+        const i = items.value.findIndex(it => it.id === selectedId.value);
+        const next = i === -1
+          ? (step > 0 ? 0 : items.value.length - 1)
+          : Math.min(items.value.length - 1, Math.max(0, i + step));
+        selectedId.value = items.value[next].id;
+        requestExpand(items.value[next]);
+        nextTick(scrollSelectedIntoView);
+      }
+
+      function paste(item) {
+        post('paste', { id: item.id });
+      }
+
+      function copySelected() {
+        if (selectedItem.value) post('copy', { id: selectedItem.value.id });
+      }
+
+      function deleteSelected() {
+        const it = selectedItem.value;
+        if (!it) return;
+        pendingIndex = items.value.findIndex(x => x.id === it.id);
+        post('delete', { id: it.id });
+      }
+
+      function onKeydown(e) {
+        const mod = e.metaKey;
+        if (mod && e.key === 'Backspace') {
+          e.preventDefault();
+          if (!e.shiftKey) deleteSelected();
+          return;
+        }
+        if (mod && (e.key === 'c' || e.key === 'C')) {
+          if (selectedItem.value) { e.preventDefault(); copySelected(); }
+          return;
+        }
+        if (e.key === 'ArrowDown') { e.preventDefault(); move(1); return; }
+        if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); return; }
+        if (e.key === 'Enter') {
+          if (selectedItem.value) { e.preventDefault(); paste(selectedItem.value); }
+          return;
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          post('close');
+        }
+      }
+
+      function focusSearch() {
+        nextTick(() => { if (searchEl.value) searchEl.value.focus(); });
+      }
+
+      function onMouseDown(e) {
+        if (e.button !== 0) return;
+        const t = e.target;
+        if (!t || !t.closest) return;
+        if (t.closest('.clip-row, .arco-input-wrapper, .arco-btn, button, input, textarea, a')) return;
+        const body = t.closest('.panel-body');
+        if (body) {
+          const r = body.getBoundingClientRect();
+          const scrollbar = body.offsetWidth - body.clientWidth;
+          if (e.clientX >= r.right - scrollbar) return;
+        }
+        e.preventDefault();
+        post('drag-start');
+      }
+
+      function onDocKeydown(e) {
+        if (e.defaultPrevented) return;
+        onKeydown(e);
+      }
+
+      window.render = function (payload) {
+        items.value = (payload.items || []).map(it => Object.assign({}, it, {
+          lower: (it.body || '').toLowerCase()
+        }));
+        total.value = payload.total || 0;
+
+        if (selectedId.value && !items.value.some(x => x.id === selectedId.value)) {
+          selectedId.value = null;
+        }
+        if (pendingIndex >= 0) {
+          const it = items.value[Math.min(pendingIndex, items.value.length - 1)];
+          selectedId.value = it ? it.id : null;
+          pendingIndex = -1;
+        }
+        if (selectedId.value) {
+          const sel = items.value.find(x => x.id === selectedId.value);
+          if (sel) requestExpand(sel);
+        }
+        nextTick(scrollSelectedIntoView);
+      };
+
+      window.expand = function (payload) {
+        const it = items.value.find(x => x.id === payload.id);
+        if (!it) return;
+        it.body = payload.body || '';
+        it.expanded = true;
+        it.expanding = false;
+        it.truncated = !!payload.truncated;
+        nextTick(scrollSelectedIntoView);
+      };
+
+      window.reset = function () {
+        keyword.value = '';
+        query.value = '';
+        selectedId.value = null;
+        items.value = [];
+        total.value = 0;
+        pendingIndex = -1;
+        nextTick(focusSearch);
+      };
+
+      onMounted(() => {
+        document.addEventListener('keydown', onDocKeydown);
+        post('ready');
+        focusSearch();
+      });
+
+      onBeforeUnmount(() => {
+        document.removeEventListener('keydown', onDocKeydown);
+        clearTimeout(debounceTimer);
+      });
+
+      return {
+        items, total, keyword, selectedId, searchEl,
+        selectedItem, emptyText,
+        relTime, highlight, select, paste, copySelected, deleteSelected,
+        onKeydown, focusSearch, onMouseDown
+      };
+    }
+  }).use(ArcoVue).mount('#app');
+</script>
+</body>
+</html>
