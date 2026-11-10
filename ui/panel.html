@@ -14,6 +14,7 @@
     -webkit-font-smoothing: antialiased;
   }
   [v-cloak] { display: none; }
+  :root { --fs: 1; }
   #app { height: 100%; }
 
   .clip-panel {
@@ -32,6 +33,7 @@
 
   .panel-head { flex: none; padding: 12px; border-bottom: 1px solid var(--color-border-1); }
   .panel-head .arco-input-wrapper { border-radius: 8px; }
+  .panel-head .arco-input { font-size: calc(14px * var(--fs)); }
   .panel-head input { user-select: text; }
 
   .panel-body {
@@ -56,34 +58,35 @@
 
   .row-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .row-src {
-    font-size: 11px; line-height: 16px; letter-spacing: .02em;
+    font-size: calc(11px * var(--fs)); line-height: calc(16px * var(--fs)); letter-spacing: .02em;
     color: var(--color-text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .row-time {
-    font-size: 11px; line-height: 16px; color: var(--color-text-3);
+    font-size: calc(11px * var(--fs)); line-height: calc(16px * var(--fs)); color: var(--color-text-3);
     font-variant-numeric: tabular-nums; white-space: nowrap;
   }
   .row-body {
-    margin-top: 2px; font-size: 13px; line-height: 20px; color: var(--color-text-1);
+    margin-top: 2px; font-size: calc(13px * var(--fs)); line-height: calc(20px * var(--fs)); color: var(--color-text-1);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .clip-row.selected .row-body {
     white-space: pre-wrap; overflow-wrap: anywhere;
     overflow: visible; text-overflow: clip;
   }
-  .row-more { margin-top: 4px; font-size: 11px; line-height: 16px; color: var(--color-text-3); }
+  .row-more { margin-top: 4px; font-size: calc(11px * var(--fs)); line-height: calc(16px * var(--fs)); color: var(--color-text-3); }
   mark {
     padding: 0 1px; border-radius: 2px; color: inherit;
     background: color-mix(in srgb, rgb(var(--primary-6)) 22%, transparent);
   }
 
   .empty-wrap { height: 100%; display: flex; align-items: center; justify-content: center; }
+  .empty-wrap .arco-empty-description { font-size: calc(14px * var(--fs)); }
 
   .panel-foot {
     flex: none; height: 32px; padding: 0 12px;
     display: flex; align-items: center; justify-content: space-between; gap: 12px;
     border-top: 1px solid var(--color-border-1);
-    font-size: 12px; color: var(--color-text-3);
+    font-size: calc(12px * var(--fs)); color: var(--color-text-3);
   }
   .hints { display: flex; align-items: center; gap: 6px; }
   kbd {
@@ -93,7 +96,7 @@
     display: inline-flex; align-items: center; justify-content: center;
     font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", Arial, sans-serif;
     font-weight: 500;
-    font-size: 11px; line-height: 16px;
+    font-size: calc(11px * var(--fs)); line-height: calc(16px * var(--fs));
     background: var(--color-fill-2); color: var(--color-text-2);
   }
   .hints .sep { color: var(--color-text-4); }
@@ -228,6 +231,7 @@
       }
 
       function select(item) {
+        if (Date.now() < suppressUntil) return;
         selectedId.value = item.id;
         requestExpand(item);
       }
@@ -254,6 +258,7 @@
       }
 
       function paste(item) {
+        if (Date.now() < suppressUntil) return;
         post('paste', { id: item.id });
       }
 
@@ -268,8 +273,31 @@
         post('delete', { id: it.id });
       }
 
+      let fontScale = 1;
+
+      function applyFontScale(v) {
+        fontScale = Math.min(1.4, Math.max(0.85, Math.round(v * 100) / 100));
+        document.documentElement.style.setProperty('--fs', String(fontScale));
+        nextTick(scrollSelectedIntoView);
+      }
+
+      function changeFontScale(delta) {
+        applyFontScale(fontScale + delta);
+        post('font-scale', { value: fontScale });
+      }
+
+      window.setFontScale = applyFontScale;
+
       function onKeydown(e) {
         const mod = e.metaKey;
+        if (mod && (e.key === '=' || e.key === '+')) { e.preventDefault(); changeFontScale(0.05); return; }
+        if (mod && e.key === '-') { e.preventDefault(); changeFontScale(-0.05); return; }
+        if (mod && e.key === '0') {
+          e.preventDefault();
+          applyFontScale(1);
+          post('font-scale', { value: fontScale });
+          return;
+        }
         if (mod && e.key === 'Backspace') {
           e.preventDefault();
           if (!e.shiftKey) deleteSelected();
@@ -295,20 +323,25 @@
         nextTick(() => { if (searchEl.value) searchEl.value.focus(); });
       }
 
+      let suppressUntil = 0;
+
       function onMouseDown(e) {
         if (e.button !== 0) return;
         const t = e.target;
         if (!t || !t.closest) return;
-        if (t.closest('.clip-row, .arco-input-wrapper, .arco-btn, button, input, textarea, a')) return;
+        if (t.closest('input, textarea, .arco-input-wrapper, .arco-btn, button, a')) return;
         const body = t.closest('.panel-body');
         if (body) {
           const r = body.getBoundingClientRect();
           const scrollbar = body.offsetWidth - body.clientWidth;
           if (e.clientX >= r.right - scrollbar) return;
         }
-        e.preventDefault();
-        post('drag-start');
+        post('drag-start', { x: e.clientX, y: e.clientY });
       }
+
+      window.suppressClick = function () {
+        suppressUntil = Date.now() + 350;
+      };
 
       function onDocKeydown(e) {
         if (e.defaultPrevented) return;

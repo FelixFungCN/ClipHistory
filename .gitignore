@@ -1,0 +1,11 @@
+.DS_Store
+*.textClipping
+
+# 本机剪贴板数据（明文历史，禁止提交）
+clipboard.db
+clipboard.db-*
+cliphistory.db
+
+# 生成物与截图
+ui/cliphistory-demo.html
+ui/screenshot-*.jpg

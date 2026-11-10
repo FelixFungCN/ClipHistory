@@ -10,6 +10,7 @@ local visible = false
 local focusedOnce = false
 local currentQuery = ""
 local targetBundle
+local fontScale = tonumber(hs.settings.get("ClipHistory.fontScale")) or 1
 
 local UI_PATH = (os.getenv("HOME") or "") .. "/.hammerspoon/ClipHistory/ui/panel.html"
 
@@ -79,6 +80,12 @@ local function sendItems()
   if not ok then log.e("render failed: " .. tostring(err)) end
 end
 
+local function applyFontScale()
+  if wv then
+    wv:evaluateJavaScript("window.setFontScale(" .. tostring(fontScale) .. ")")
+  end
+end
+
 local dragTap, dragOrigin, dragFrame
 
 local function stopDrag(save)
@@ -94,25 +101,38 @@ local function stopDrag(save)
   dragFrame = nil
 end
 
-local function startDrag()
+local function startDrag(px, py)
   if not visible or not wv then return end
   stopDrag(false)
-  local p = hs.mouse.absolutePosition()
   local f = wv:frame()
-  dragOrigin = { x = p.x, y = p.y }
+  if px and py then
+    dragOrigin = { x = f.x + px, y = f.y + py }
+  else
+    local p = hs.mouse.absolutePosition()
+    dragOrigin = { x = p.x, y = p.y }
+  end
   dragFrame = { x = f.x, y = f.y, w = f.w, h = f.h }
+  local dragMoved = false
   dragTap = hs.eventtap.new({
     hs.eventtap.event.types.leftMouseDragged,
     hs.eventtap.event.types.leftMouseUp,
   }, function(e)
     if e:getType() == hs.eventtap.event.types.leftMouseUp then
-      stopDrag(true)
+      stopDrag(dragMoved)
+      if dragMoved and wv then
+        wv:evaluateJavaScript("window.suppressClick && window.suppressClick()")
+      end
       return false
     end
     local q = e:location()
+    local dx, dy = q.x - dragOrigin.x, q.y - dragOrigin.y
+    if not dragMoved then
+      if math.abs(dx) < 4 and math.abs(dy) < 4 then return true end
+      dragMoved = true
+    end
     wv:frame({
-      x = dragFrame.x + (q.x - dragOrigin.x),
-      y = dragFrame.y + (q.y - dragOrigin.y),
+      x = dragFrame.x + dx,
+      y = dragFrame.y + dy,
       w = dragFrame.w,
       h = dragFrame.h,
     })
@@ -171,6 +191,7 @@ local function onMessage(msg)
   local t = body.type
   if t == "ready" then
     sendItems()
+    applyFontScale()
   elseif t == "search" then
     currentQuery = tostring(body.q or "")
     sendItems()
@@ -184,8 +205,11 @@ local function onMessage(msg)
         truncated = truncated,
       }) .. ")")
     end
+  elseif t == "font-scale" then
+    fontScale = tonumber(body.value) or 1
+    hs.settings.set("ClipHistory.fontScale", fontScale)
   elseif t == "drag-start" then
-    startDrag()
+    startDrag(tonumber(body.x), tonumber(body.y))
   elseif t == "delete" then
     db.delete(body.id)
     sendItems()
@@ -276,6 +300,7 @@ function M.show()
   if hsApp then hsApp:activate() end
 
   wv:evaluateJavaScript("window.reset && window.reset()")
+  applyFontScale()
   sendItems()
 
   hs.timer.doAfter(0.06, function()

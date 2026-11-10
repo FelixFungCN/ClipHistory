@@ -1,4 +1,5 @@
 local M = {
+  version = "1.1.0",
   hotkey = { mods = { "cmd" }, key = "b" },
   dbPath = (os.getenv("HOME") or "") .. "/.hammerspoon/clipboard.db",
   panelWidth = 720,
