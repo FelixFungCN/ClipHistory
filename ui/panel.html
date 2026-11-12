@@ -137,7 +137,7 @@
         >
           <div class="row-meta">
             <span class="row-src">{{ item.src }}</span>
-            <span class="row-time">{{ relTime(item.ts) }}</span>
+            <span class="row-time">{{ relTime(item.ts) + '\u00A0\u00A0' + fmtTime(item.ts) }}</span>
           </div>
           <div class="row-body">
             <template v-for="(seg, i) in highlight(item.body)" :key="i">
@@ -195,6 +195,7 @@
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => {
           const q = val.trim();
+          if (q.toLowerCase() === query.value) return;
           query.value = q.toLowerCase();
           post('search', { q });
         }, 100);
@@ -216,6 +217,12 @@
         if (d < 3600000) return Math.floor(d / 60000) + ' 分钟前';
         if (d < 86400000) return Math.floor(d / 3600000) + ' 小时前';
         return Math.floor(d / 86400000) + ' 天前';
+      }
+
+      function fmtTime(ts) {
+        const d = new Date(ts * 1000);
+        const p = n => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
       }
 
       function highlight(text) {
@@ -287,6 +294,7 @@
       }
 
       window.setFontScale = applyFontScale;
+      window.focusSearch = focusSearch;
 
       function onKeydown(e) {
         const mod = e.metaKey;
@@ -348,11 +356,31 @@
         onKeydown(e);
       }
 
-      window.render = function (payload) {
-        items.value = (payload.items || []).map(it => Object.assign({}, it, {
-          lower: (it.body || '').toLowerCase()
-        }));
+      function applyItems(payload) {
+        items.value = (payload.items || []).map(it => Object.assign({}, it));
         total.value = payload.total || 0;
+      }
+
+      function clearInput() {
+        query.value = '';
+        keyword.value = '';
+        selectedId.value = null;
+        pendingIndex = -1;
+      }
+
+      window.prepare = function (payload) {
+        clearInput();
+        applyItems(payload);
+        nextTick(focusSearch);
+      };
+
+      window.prepareEmpty = function () {
+        clearInput();
+        nextTick(focusSearch);
+      };
+
+      window.render = function (payload) {
+        applyItems(payload);
 
         if (selectedId.value && !items.value.some(x => x.id === selectedId.value)) {
           selectedId.value = null;
@@ -379,31 +407,23 @@
         nextTick(scrollSelectedIntoView);
       };
 
-      window.reset = function () {
-        keyword.value = '';
-        query.value = '';
-        selectedId.value = null;
-        items.value = [];
-        total.value = 0;
-        pendingIndex = -1;
-        nextTick(focusSearch);
-      };
-
       onMounted(() => {
         document.addEventListener('keydown', onDocKeydown);
+        window.addEventListener('focus', focusSearch);
         post('ready');
         focusSearch();
       });
 
       onBeforeUnmount(() => {
         document.removeEventListener('keydown', onDocKeydown);
+        window.removeEventListener('focus', focusSearch);
         clearTimeout(debounceTimer);
       });
 
       return {
         items, total, keyword, selectedId, searchEl,
         selectedItem, emptyText,
-        relTime, highlight, select, paste, copySelected, deleteSelected,
+        relTime, fmtTime, highlight, select, paste, copySelected, deleteSelected,
         onKeydown, focusSearch, onMouseDown
       };
     }

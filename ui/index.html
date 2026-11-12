@@ -157,7 +157,7 @@
           >
             <div class="row-meta">
               <span class="row-src">{{ item.src }}</span>
-              <span class="row-time">{{ relTime(item.ts) }}</span>
+              <span class="row-time">{{ relTime(item.ts) + '\u00A0\u00A0' + fmtTime(item.ts) }}</span>
             </div>
             <div class="row-body">
               <template v-for="(seg, i) in highlight(item.body)" :key="i">
@@ -264,6 +264,12 @@
         return Math.floor(d / 86400000) + ' 天前';
       }
 
+      function fmtTime(ts) {
+        const d = new Date(ts);
+        const p = n => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+      }
+
       function highlight(text) {
         const re = hlRe.value;
         if (!re) return [{ t: text, hit: false }];
@@ -364,7 +370,7 @@
       return {
         items, keyword, selectedId, event, searchEl,
         filtered, total, selectedItem, emptyText,
-        relTime, highlight, select, paste, copySelected, deleteSelected,
+        relTime, fmtTime, highlight, select, paste, copySelected, deleteSelected,
         resetData, onKeydown, focusSearch
       };
     }

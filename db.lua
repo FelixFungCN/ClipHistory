@@ -3,6 +3,11 @@ local config = require("ClipHistory.config")
 
 local M = {}
 local db
+local generation = 0
+
+function M.generation()
+  return generation
+end
 
 local function shq(s)
   return "'" .. s:gsub("'", "'\\''") .. "'"
@@ -89,6 +94,7 @@ function M.insert(item)
     stmt:bind_values(now, item.src_bundle, item.src_name, last.id)
     stmt:step()
     stmt:finalize()
+    generation = generation + 1
     return tonumber(last.id)
   end
 
@@ -97,6 +103,7 @@ function M.insert(item)
   stmt:bind_values(item.body, item.src_bundle, item.src_name, now, #item.body)
   stmt:step()
   stmt:finalize()
+  generation = generation + 1
   return tonumber(db:last_insert_rowid())
 end
 
@@ -139,6 +146,7 @@ function M.delete(id)
   stmt:bind_values(tonumber(id))
   stmt:step()
   stmt:finalize()
+  generation = generation + 1
   return true
 end
 

@@ -8,8 +8,13 @@ local log = hs.logger.new("ClipHistory.panel", "warning")
 local wv, uc
 local visible = false
 local focusedOnce = false
+local pendingFocus = false
+local pageReady = false
 local currentQuery = ""
 local targetBundle
+local hsApp
+local lastFrame
+local lastGen, lastQuery
 local fontScale = tonumber(hs.settings.get("ClipHistory.fontScale")) or 1
 
 local UI_PATH = (os.getenv("HOME") or "") .. "/.hammerspoon/ClipHistory/ui/panel.html"
@@ -62,8 +67,8 @@ local function keywords(q)
   return out
 end
 
-local function sendItems()
-  if not wv then return end
+local function buildPayload()
+  local gen = db.generation()
   local rows = db.search(keywords(currentQuery))
   local payload = { items = {}, total = db.count(), query = currentQuery }
   for _, r in ipairs(rows) do
@@ -74,15 +79,31 @@ local function sendItems()
       ts = tonumber(r.created_at),
     }
   end
+  return payload, gen
+end
+
+local function sendItems()
+  if not (wv and pageReady) then return end
+  local payload, gen = buildPayload()
   local ok, err = pcall(function()
     wv:evaluateJavaScript("window.render(" .. hs.json.encode(payload) .. ")")
   end)
-  if not ok then log.e("render failed: " .. tostring(err)) end
+  if ok then
+    lastGen, lastQuery = gen, currentQuery
+  else
+    log.e("render failed: " .. tostring(err))
+  end
 end
 
 local function applyFontScale()
   if wv then
     wv:evaluateJavaScript("window.setFontScale(" .. tostring(fontScale) .. ")")
+  end
+end
+
+local function focusSearch()
+  if wv then
+    wv:evaluateJavaScript("window.focusSearch && window.focusSearch()")
   end
 end
 
@@ -95,7 +116,8 @@ local function stopDrag(save)
   end
   if save and wv then
     local f = wv:frame()
-    hs.settings.set("ClipHistory.panelFrame", { x = f.x, y = f.y, w = f.w, h = f.h })
+    lastFrame = { x = f.x, y = f.y, w = f.w, h = f.h }
+    hs.settings.set("ClipHistory.panelFrame", lastFrame)
   end
   dragOrigin = nil
   dragFrame = nil
@@ -146,6 +168,7 @@ local function hide(restoreFocus)
   stopDrag(false)
   visible = false
   focusedOnce = false
+  pendingFocus = false
   if wv then wv:hide() end
   if restoreFocus and targetBundle then
     local app = hs.application.get(targetBundle)
@@ -190,8 +213,10 @@ local function onMessage(msg)
   if type(body) ~= "table" then return end
   local t = body.type
   if t == "ready" then
+    pageReady = true
     sendItems()
     applyFontScale()
+    if visible then focusSearch() end
   elseif t == "search" then
     currentQuery = tostring(body.q or "")
     sendItems()
@@ -237,11 +262,16 @@ local function create()
     if action == "focusChange" then
       if state then
         focusedOnce = true
+        if pendingFocus then
+          pendingFocus = false
+          focusSearch()
+        end
       elseif visible and focusedOnce then
         hide(false)
       end
     end
   end)
+  pageReady = false
   wv:url("file://" .. UI_PATH)
 end
 
@@ -249,6 +279,8 @@ local wakeWatcher
 
 function M.start()
   if wakeWatcher then return end
+  hsApp = hs.application.get("Hammerspoon")
+  create()
   wakeWatcher = hs.caffeinate.watcher.new(function(event)
     if event == hs.caffeinate.watcher.systemDidWake and visible then
       hide(false)
@@ -267,8 +299,15 @@ function M.stop()
     wv:delete()
     wv = nil
   end
+  pageReady = false
   visible = false
   focusedOnce = false
+  pendingFocus = false
+  lastGen, lastQuery = nil, nil
+end
+
+local function framesEqual(a, b)
+  return a and b and a.x == b.x and a.y == b.y and a.w == b.w and a.h == b.h
 end
 
 local function restoreFrame()
@@ -291,23 +330,30 @@ function M.show()
 
   currentQuery = ""
   focusedOnce = false
-  wv:frame(restoreFrame())
+  pendingFocus = true
+
+  local f = restoreFrame()
+  if not framesEqual(f, lastFrame) then
+    wv:frame(f)
+    lastFrame = f
+  end
+
+  -- 面板出现前先在隐藏状态把内容准备好，显示时直接是成品
+  if pageReady then
+    if db.generation() ~= lastGen or lastQuery ~= "" then
+      local payload, gen = buildPayload()
+      wv:evaluateJavaScript("window.prepare(" .. hs.json.encode(payload) .. ")")
+      lastGen, lastQuery = gen, currentQuery
+    else
+      wv:evaluateJavaScript("window.prepareEmpty()")
+    end
+  end
+
   wv:show()
   wv:bringToFront()
   visible = true
-
-  local hsApp = hs.application.get("Hammerspoon")
+  if not hsApp then hsApp = hs.application.get("Hammerspoon") end
   if hsApp then hsApp:activate() end
-
-  wv:evaluateJavaScript("window.reset && window.reset()")
-  applyFontScale()
-  sendItems()
-
-  hs.timer.doAfter(0.06, function()
-    if visible then
-      wv:evaluateJavaScript("var e=document.querySelector('.panel-head input'); if (e) e.focus();")
-    end
-  end)
 end
 
 function M.hide()
